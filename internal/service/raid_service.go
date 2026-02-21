@@ -36,7 +36,7 @@ func (s *RaidService) ProcessRaid(ctx context.Context, csvFile io.Reader, logID 
 	}
 
 	// 2. Fetch the JSON loot from Turtlogs
-	logData, err := s.logClient.GetRaidLoot(logID)
+	logData, err := s.logClient.GetRaidData(logID)
 	if err != nil {
 		return fmt.Errorf("turtlogs fetch failed: %w", err)
 	}
@@ -71,11 +71,11 @@ func (s *RaidService) ProcessRaid(ctx context.Context, csvFile io.Reader, logID 
 	return nil
 }
 
-func (s *RaidService) analyzeLoot(reservedItem string, logData *turtlogs.LogResponse) (bool, string) {
-	for _, drop := range logData.Loot {
+func (s *RaidService) analyzeLoot(reservedItem string, logData *turtlogs.RaidData) (bool, string) {
+	for _, drop := range logData.LootDrops {
 		// We use Case Insensitive comparison for safety
 		if strings.EqualFold(strings.TrimSpace(drop.ItemName), strings.TrimSpace(reservedItem)) {
-			return true, drop.PlayerName
+			return true, drop.WinnerName
 		}
 	}
 	return false, ""

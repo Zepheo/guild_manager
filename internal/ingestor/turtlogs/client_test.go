@@ -7,57 +7,102 @@ import (
 	"testing"
 )
 
-func TestGetRaidLoot(t *testing.T) {
-	// 1. Create a mock server
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the URL path is correct
-		expectedPath := "/api/v1/logs/12345"
-		if r.URL.Path != expectedPath {
-			t.Errorf("expected path %s, got %s", expectedPath, r.URL.Path)
-		}
-
-		// Return a mock JSON response
-		response := LogResponse{
-			Loot: []LootEntry{
-				{ItemName: "Ashkandi", PlayerName: "Zepheo"},
-				{ItemName: "Revenant Hebdomad", PlayerName: "Grom"},
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer mockServer.Close()
-
-	// 2. Initialize client pointing to mock server
-	client := NewTurtlogsClient(mockServer.URL)
-
-	// 3. Execute
-	data, err := client.GetRaidLoot("12345")
-
-	// 4. Assertions
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+// TestMapClassId tests the utility function for WoW class mapping
+func TestMapClassId(t *testing.T) {
+	tests := []struct {
+		id       int
+		expected string
+	}{
+		{1, "Warrior"},
+		{11, "Druid"},
+		{99, "Unknown"},
 	}
 
-	if len(data.Loot) != 2 {
-		t.Errorf("expected 2 loot entries, got %d", len(data.Loot))
-	}
-
-	if data.Loot[0].ItemName != "Ashkandi" {
-		t.Errorf("expected Ashkandi, got %s", data.Loot[0].ItemName)
+	for _, tt := range tests {
+		if res := mapClassId(tt.id); res != tt.expected {
+			t.Errorf("mapClassId(%d) = %s; want %s", tt.id, res, tt.expected)
+		}
 	}
 }
 
-func TestGetRaidLoot_HttpError(t *testing.T) {
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+// TestGetRaidPlayers tests the participant fetching and class mapping integration
+func TestGetRaidPlayers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mockParticipants := []Participants{
+			{CharacterID: 101, Name: "Thrall", HeroClassID: 7}, // Shaman
+			{CharacterID: 102, Name: "Uther", HeroClassID: 2},  // Paladin
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(mockParticipants)
 	}))
-	defer mockServer.Close()
+	defer server.Close()
 
-	client := NewTurtlogsClient(mockServer.URL)
-	_, err := client.GetRaidLoot("invalid_id")
+	client := NewTurtlogsClient(server.URL)
+	players, err := client.GetRaidPlayers("12345")
 
-	if err == nil {
-		t.Error("expected error for 404 status, got nil")
+	if err != nil {
+		t.Fatalf("Failed to get players: %v", err)
+	}
+
+	if players[101].Class != "Shaman" || players[102].CharacterName != "Uther" {
+		t.Errorf("Players data mismatch: %+v", players)
+	}
+}
+
+// TestGetRaidLoot tests the extraction from the raw interface slice
+func TestGetRaidLoot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The API returns a list of lists with mixed types
+		// Entry[3] is WinnerID (float64 in JSON), Entry[5] is ItemName (string)
+		mockLoot := [][]any{
+			{0, 0, 0, 500, 0, "Ashkandi", 0, 0},
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(mockLoot)
+	}))
+	defer server.Close()
+
+	client := NewTurtlogsClient(server.URL)
+	loot, err := client.GetRaidLoot("12345")
+
+	if err != nil {
+		t.Fatalf("Failed to get loot: %v", err)
+	}
+
+	// Note: You will need to fix the bug in GetRaidLoot for this to pass (see below)
+	if len(loot) == 0 || loot[0].ItemName != "Ashkandi" || loot[0].WinnerID != 500 {
+		t.Errorf("Loot data mismatch: %+v", loot)
+	}
+}
+
+// TestGetLogId tests the Regex logic for different URL formats
+func TestGetLogId(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The API returns a list of lists with mixed types
+		mockTiny := TinyResolverResponse{ID: 90027, URLPayload: "{\"payload\":{\"instance_meta_id\":90027}}"}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(mockTiny)
+	}))
+	defer server.Close()
+	client := NewTurtlogsClient(server.URL)
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"12345", "12345"},                           // Raw ID
+		{server.URL + "/viewer/67890/base", "67890"}, // Full URL
+		{server.URL + "/tiny_url/67890", "90027"},    // Tiny URL
+		{"invalid-string", ""},                       // Error case
+	}
+
+	for _, tt := range tests {
+		res, err := client.getLogId(tt.input)
+		if tt.expected == "" && err == nil {
+			t.Errorf("Expected error for input %s, but got none", tt.input)
+		}
+		if res != tt.expected {
+			t.Errorf("getLogId(%s) = %s; want %s", tt.input, res, tt.expected)
+		}
 	}
 }

@@ -4,6 +4,8 @@ set shell := ["powershell.exe", "-c"]
 
 compose_file := "deployments/docker-compose.yml"
 docker_cmd := "docker-compose -f " + compose_file
+DB_USER := env_var_or_default("DB_USER", "admin")
+DB_NAME := env_var_or_default("DB_NAME", "sr_plus")
 
 # Start the whole stack
 up:
@@ -30,3 +32,11 @@ logs service='api':
 # Usage: `just test` or `just test ./pkg/auth`
 test path='./...':
     go test -v  {{ path }}
+
+#
+
+# Backup the production database to a timestamped .sql file
+backup:
+    @mkdir -p backups
+    docker exec sr_plus_db pg_dump -U {{ DB_USER }} {{ DB_NAME }} > backups/backup_$(date +%Y%m%d_%H%M%S).sql
+    @echo "Backup saved to backups/ folder."
