@@ -4,8 +4,8 @@ set shell := ["powershell.exe", "-c"]
 
 compose_file := "deployments/docker-compose.yml"
 docker_cmd := "docker-compose -f " + compose_file
-DB_USER := env_var_or_default("DB_USER", "admin")
-DB_NAME := env_var_or_default("DB_NAME", "sr_plus")
+DB_USER := env("DB_USER", "admin")
+DB_NAME := env("DB_NAME", "sr_plus")
 
 # Start the whole stack
 up:
