@@ -1,0 +1,15 @@
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+WORKDIR /app
+ARG TARGETOS
+ARG TARGETARCH
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /guild_manager_api ./cmd/api
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+COPY --from=builder /guild_manager_api /guild_manager_api
+RUN chmod +x /guild_manager_api
+EXPOSE 8080
+ENTRYPOINT ["/guild_manager_api"]

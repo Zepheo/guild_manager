@@ -38,5 +38,5 @@ test path='./...':
 # Backup the production database to a timestamped .sql file
 backup:
     @mkdir -p backups
-    docker exec sr_plus_db pg_dump -U {{ DB_USER }} {{ DB_NAME }} > backups/backup_$(date +%Y%m%d_%H%M%S).sql
+    docker exec guild_manager_db pg_dump -U {{ DB_USER }} {{ DB_NAME }} > backups/backup_$(date +%Y%m%d_%H%M%S).sql
     @echo "Backup saved to backups/ folder."
