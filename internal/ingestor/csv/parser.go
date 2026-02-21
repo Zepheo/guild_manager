@@ -39,14 +39,14 @@ func (p *Parser) ParseRaidResCSV(r io.Reader) ([]domain.ReserveEntry, error) {
 	}
 
 	// Common column names in these tools: "player", "character", "item", "reserve"
-	nameIdx, nameOk := colMap["player"] // or "character"
+	nameIdx, nameOk := colMap["attendee"] // or "character"
 	if !nameOk {
-		nameIdx, _ = colMap["character"]
+		return nil, fmt.Errorf("required column 'attendee' not found in CSV")
 	}
 	itemIdx, itemOk := colMap["item"]
 
 	if !itemOk {
-		return nil, fmt.Errorf("required columns (player/item) not found in CSV")
+		return nil, fmt.Errorf("required columns 'item' not found in CSV")
 	}
 
 	var entries []domain.ReserveEntry
