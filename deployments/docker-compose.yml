@@ -44,6 +44,7 @@ services:
         condition: service_healthy
     environment:
       DB_URL: postgres://${DB_USER:-admin}:${DB_PASSWORD:-supersecret}@db:5432/${DB_NAME:-guild_manager}?sslmode=disable
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       LOGS_URL: ${LOGS_URL}
 

@@ -1,6 +1,11 @@
 package discord
 
-import "github.com/bwmarrin/discordgo"
+import (
+	"log"
+	"os"
+
+	"github.com/bwmarrin/discordgo"
+)
 
 var Commands = []*discordgo.ApplicationCommand{
 	{
@@ -36,9 +41,15 @@ var Commands = []*discordgo.ApplicationCommand{
 }
 
 func (b *DiscordBot) RegisterCommands() ([]*discordgo.ApplicationCommand, error) {
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+
+	if guildID == "" {
+		log.Fatal("DISCORD_GUILD_ID environment variable is not set")
+	}
+
 	registeredCommands := make([]*discordgo.ApplicationCommand, len(Commands))
 	for i, c := range Commands {
-		cmd, err := b.Session.ApplicationCommandCreate(b.Session.State.User.ID, "960543410530418708", c)
+		cmd, err := b.Session.ApplicationCommandCreate(b.Session.State.User.ID, guildID, c)
 		if err != nil {
 			return nil, err
 		}
