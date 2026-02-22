@@ -21,7 +21,6 @@ services:
       retries: 5
 
   api:
-    platform: linux/amd64
     build:
       context: ..
       dockerfile: deployments/Dockerfile.api
@@ -36,7 +35,6 @@ services:
       LOGS_URL: ${LOGS_URL}
 
   discord:
-    platform: linux/amd64
     build:
       context: ..
       dockerfile: deployments/Dockerfile.discord
