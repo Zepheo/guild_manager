@@ -8,6 +8,7 @@ import (
 
 type RaidRepository interface {
 	GetLastReserve(ctx context.Context, charName string) (string, error)
-	GetPlayerBonus(ctx context.Context, charName string) (int, error)
+	GetBulkPlayerBonuses(ctx context.Context, charNames []string) (map[string]map[string]int, error)
+	GetPlayerBonuses(ctx context.Context, charName string) (map[string]int, error)
 	RecordRaid(ctx context.Context, raid *domain.RaidResult) error
 }

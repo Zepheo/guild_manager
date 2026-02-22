@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 	"github.com/zepheo/guild_manager/internal/domain"
 )
@@ -50,24 +51,82 @@ func (r *PostgresRaidRepo) GetLastReserve(ctx context.Context, charName string) 
 	return itemName, err
 }
 
-func (r *PostgresRaidRepo) GetPlayerBonus(ctx context.Context, charName string) (int, error) {
+func (r *PostgresRaidRepo) GetBulkPlayerBonuses(ctx context.Context, charNames []string) (map[string]map[string]int, error) {
+	// This query calculates the bonus for every player/item combo in history
+	// It uses a window function to identify the most recent "reset" event (win or not reserved)
+	// and sums the +20s that happened after that reset.
+	query := `
+	WITH RELEVANT_HISTORY AS (
+		SELECT
+			c.name as char_name,
+			i.name as item_name,
+			rd.raid_date,
+			EXISTS(SELECT 1 FROM reserves res2 WHERE res2.raid_id = rd.id AND res2.character_id = c.id AND res2.item_id = i.id) as is_reserved,
+			EXISTS(SELECT 1 FROM loot_history lh WHERE lh.raid_id = rd.id AND lh.item_id = i.id) as item_dropped,
+			EXISTS(SELECT 1 FROM loot_history lh WHERE lh.raid_id = rd.id AND lh.winner_id = c.id AND lh.item_id = i.id) as player_won
+		FROM raids rd
+		CROSS JOIN (SELECT id, name FROM characters WHERE name = ANY($1)) c
+		CROSS JOIN (SELECT id, name FROM items) i
+	),
+	STREAKS AS (
+		SELECT
+			char_name,
+			item_name,
+			is_reserved,
+			item_dropped,
+			player_won,
+			-- Create a grouping factor that increments every time a "reset" happens
+			SUM(CASE WHEN NOT is_reserved OR player_won THEN 1 ELSE 0 END)
+				OVER (PARTITION BY char_name, item_name ORDER BY raid_date ASC) as streak_id
+		FROM RELEVANT_HISTORY
+	)
+	SELECT char_name, item_name, SUM(20) as total_bonus
+	FROM STREAKS
+	WHERE is_reserved = TRUE AND item_dropped = TRUE AND player_won = FALSE
+	-- We only care about the CURRENT streak (the rows after the last reset)
+	AND streak_id = (SELECT MAX(streak_id) FROM STREAKS s2 WHERE s2.char_name = STREAKS.char_name AND s2.item_name = STREAKS.item_name)
+	GROUP BY char_name, item_name
+	HAVING SUM(20) > 0;`
+
+	rows, err := r.Db.QueryContext(ctx, query, pq.Array(charNames))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make(map[string]map[string]int)
+	for rows.Next() {
+		var pName, iName string
+		var bonus int
+		if err := rows.Scan(&pName, &iName, &bonus); err != nil {
+			return nil, err
+		}
+		if results[pName] == nil {
+			results[pName] = make(map[string]int)
+		}
+		results[pName][iName] = bonus
+	}
+	return results, nil
+}
+
+func (r *PostgresRaidRepo) GetPlayerBonuses(ctx context.Context, charName string) (map[string]int, error) {
 	currentReserves, err := r.getCurrentReserves(ctx, charName)
-	if err != nil || len(currentReserves) == 0 {
-		return 0, nil
+	if err != nil {
+		return nil, err
 	}
 
-	maxBonus := 0
+	bonuses := make(map[string]int)
 	for _, itemName := range currentReserves {
 		itemBonus, err := r.calculateBonusForItem(ctx, charName, itemName)
 		if err != nil {
+			fmt.Printf("error calculating bonus: %v\n", err)
+			bonuses[itemName] = 0
 			continue
 		}
-		if itemBonus > maxBonus {
-			maxBonus = itemBonus
-		}
+		bonuses[itemName] = itemBonus
 	}
 
-	return maxBonus, nil
+	return bonuses, nil
 }
 
 func (r *PostgresRaidRepo) RecordRaid(ctx context.Context, raid *domain.RaidResult) error {

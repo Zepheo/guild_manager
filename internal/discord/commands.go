@@ -8,9 +8,9 @@ var Commands = []*discordgo.ApplicationCommand{
 		Description: "Check current SR+ bonus",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "character",
-				Description: "Character name",
+				Type:        discordgo.ApplicationCommandOptionAttachment,
+				Name:        "file",
+				Description: "Reserve list to update SR for",
 				Required:    true,
 			},
 		},

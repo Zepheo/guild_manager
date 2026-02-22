@@ -24,6 +24,49 @@ func NewRaidService(r storage.RaidRepository, p *csv.Parser, c *turtlogs.Turtlog
 	}
 }
 
+type SRPlus struct {
+	ItemName string
+	SR       int
+}
+
+func (s *RaidService) CalculateSRPlus(ctx context.Context, csvFile io.Reader) (map[string][]SRPlus, error) {
+	// 1. Parse the incoming CSV
+	reserves, err := s.csvParser.ParseRaidResCSV(csvFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Prepare the result map: PlayerName -> List of SRPlus objects
+	nameMap := make(map[string]bool)
+	for _, r := range reserves {
+		nameMap[r.PlayerName] = true
+	}
+
+	var names []string
+	for name := range nameMap {
+		names = append(names, name)
+	}
+
+	// Bulk fetch bonuses
+	bulkData, err := s.repo.GetBulkPlayerBonuses(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]SRPlus)
+	for _, entry := range reserves {
+		if playerBonuses, ok := bulkData[entry.PlayerName]; ok {
+			if bonus, exists := playerBonuses[entry.ItemName]; exists && bonus > 0 {
+				result[entry.PlayerName] = append(result[entry.PlayerName], SRPlus{
+					ItemName: entry.ItemName,
+					SR:       bonus,
+				})
+			}
+		}
+	}
+	return result, nil
+}
+
 func (s *RaidService) ProcessRaid(ctx context.Context, csvFile io.Reader, logID string) error {
 	reserves, err := s.csvParser.ParseRaidResCSV(csvFile)
 	if err != nil {
