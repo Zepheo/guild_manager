@@ -9,11 +9,17 @@ DB_NAME := env("DB_NAME", "sr_plus")
 
 # Start the whole stack
 up:
-    {{ docker_cmd }} up -d
+    {{ docker_cmd }} up -d --force-recreate
 
 # Stop the stack
 down:
     {{ docker_cmd }} down
+
+start service='api':
+    {{ docker_cmd }} start {{ service }}
+
+stop service='api':
+    {{ docker_cmd }} stop {{ service }}
 
 # Rebuild a specific service (defaults to 'api')
 

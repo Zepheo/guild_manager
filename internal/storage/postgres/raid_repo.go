@@ -20,12 +20,10 @@ func Connect(connStr string) (*sql.DB, error) {
 		return nil, fmt.Errorf("error opening database: %w", err)
 	}
 
-	// Set connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(25)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	// Verify connection
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("error connecting to the database: %w", err)
 	}
@@ -53,78 +51,166 @@ func (r *PostgresRaidRepo) GetLastReserve(ctx context.Context, charName string) 
 }
 
 func (r *PostgresRaidRepo) GetPlayerBonus(ctx context.Context, charName string) (int, error) {
-	var bonus int
-	err := r.Db.QueryRowContext(ctx, "SELECT current_bonus FROM characters WHERE name = $1", charName).Scan(&bonus)
-	if err == sql.ErrNoRows {
-		return 0, nil // New players start at 0
-	}
-	return bonus, err
-}
-
-// Ensure the UpdatePlayerBonus method also exists to satisfy the interface
-func (r *PostgresRaidRepo) UpdatePlayerBonus(ctx context.Context, charName string, newBonus int, reason string) error {
-	_, err := r.Db.ExecContext(ctx, "UPDATE characters SET current_bonus = $1 WHERE name = $2", newBonus, charName)
-	return err
-}
-
-func (r *PostgresRaidRepo) ProcessRaidUpdate(ctx context.Context, charName string, newBonus int, reason string) error {
-	tx, err := r.Db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// 1. Update the character's current state
-	_, err = tx.ExecContext(ctx,
-		"UPDATE characters SET current_bonus = $1 WHERE name = $2",
-		newBonus, charName)
-	if err != nil {
-		return err
+	currentReserves, err := r.getCurrentReserves(ctx, charName)
+	if err != nil || len(currentReserves) == 0 {
+		return 0, nil
 	}
 
-	// 2. Insert into history for manual audit/overrides
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO bonus_history (character_id, change_amount, reason)
-		 SELECT id, $1, $2 FROM characters WHERE name = $3`,
-		newBonus, reason, charName)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
-func (r *PostgresRaidRepo) RecordRaid(ctx context.Context, raidResult *domain.RaidResult) error {
-	tx, err := r.Db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// 1. Record the Raid metadata
-	raidMetaQuery := `
-		INSERT INTO raids (id, raid_date)
-		VALUES ($1, $2)
-		ON CONFLICT (id) DO NOTHING
-	`
-	_, err = tx.ExecContext(ctx, raidMetaQuery, raidResult.RaidID, raidResult.RaidDate)
-	if err != nil {
-		return fmt.Errorf("failed to record raid metadata: %w", err)
-	}
-
-	// 2. Record each specific reserve entry
-	for _, res := range raidResult.Reserves {
-		reservesQuery := `
-			INSERT INTO reserves (character_id, raid_id, item_id)
-			SELECT c.id, $1, i.id
-			FROM characters c, items i
-			WHERE c.name = $2 AND i.name = $3
-		`
-		_, err = tx.ExecContext(ctx, reservesQuery, raidResult.RaidID, res.PlayerName, res.ItemName)
+	maxBonus := 0
+	for _, itemName := range currentReserves {
+		itemBonus, err := r.calculateBonusForItem(ctx, charName, itemName)
 		if err != nil {
-			return fmt.Errorf("failed to record reserve for %s: %w", res.PlayerName, err)
+			continue
+		}
+		if itemBonus > maxBonus {
+			maxBonus = itemBonus
+		}
+	}
+
+	return maxBonus, nil
+}
+
+func (r *PostgresRaidRepo) RecordRaid(ctx context.Context, raid *domain.RaidResult) error {
+	tx, err := r.Db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx,
+		"INSERT INTO raids (id, raid_date) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+		raid.RaidID, raid.RaidDate)
+	if err != nil {
+		return err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return tx.Commit()
+	}
+
+	for _, char := range raid.Attendees {
+		_, err = tx.ExecContext(ctx,
+			"INSERT INTO characters (id, name, class) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+			char.ID, char.CharacterName, char.Class)
+		if err != nil {
+			return fmt.Errorf("error on character insert: %v", err)
+		}
+		_, err = tx.ExecContext(ctx,
+			"INSERT INTO attendance (raid_id, character_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+			raid.RaidID, char.ID)
+		if err != nil {
+			return fmt.Errorf("error on attendance insert: %v", err)
+		}
+	}
+
+	for _, res := range raid.Reserves {
+		tx.ExecContext(ctx, "INSERT INTO items (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", res.ItemName)
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO reserves (character_id, raid_id, item_id)
+			SELECT c.id, $1, i.id FROM characters c, items i
+			WHERE c.name = $2 AND i.name = $3`,
+			raid.RaidID, res.PlayerName, res.ItemName)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, drop := range raid.Drops {
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO loot_history (raid_id, item_id, winner_id, is_reserve_win)
+			SELECT $1, i.id, c.id, EXISTS (
+				SELECT 1 from reserves r
+				WHERE r.raid_id = $1
+				AND r.character_id = c.id
+				AND r.item_id = i.id
+			)
+			FROM items i, characters c
+			WHERE i.name = $2 AND c.name = $3`,
+			raid.RaidID, drop.ItemName, drop.WinnerName)
+		if err != nil {
+			return err
 		}
 	}
 
 	return tx.Commit()
+}
+
+func (r *PostgresRaidRepo) calculateBonusForItem(ctx context.Context, charName, itemName string) (int, error) {
+	query := `
+		SELECT
+			rd.id,
+			EXISTS(SELECT 1 FROM reserves res2 JOIN items i2 ON res2.item_id = i2.id
+			       WHERE res2.raid_id = rd.id AND res2.character_id = c.id AND i2.name = $2) as is_reserved,
+			EXISTS(SELECT 1 FROM loot_history lh JOIN items i3 ON lh.item_id = i3.id
+			       WHERE lh.raid_id = rd.id AND i3.name = $2) as item_dropped,
+			EXISTS(SELECT 1 FROM loot_history lh JOIN items i4 ON lh.item_id = i4.id
+			       WHERE lh.raid_id = rd.id AND lh.winner_id = c.id AND i4.name = $2) as player_won
+		FROM raids rd
+		CROSS JOIN characters c
+		WHERE c.name = $1
+		ORDER BY rd.raid_date ASC`
+
+	rows, err := r.Db.QueryContext(ctx, query, charName, itemName)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	bonus := 0
+	for rows.Next() {
+		var raidID string
+		var isReserved, itemDropped, playerWon bool
+		rows.Scan(&raidID, &isReserved, &itemDropped, &playerWon)
+
+		if !isReserved || playerWon {
+			bonus = 0
+			continue
+		}
+
+		if itemDropped && !playerWon {
+			bonus += 20
+		}
+	}
+	return bonus, nil
+}
+
+func (r *PostgresRaidRepo) getCurrentReserves(ctx context.Context, charName string) ([]string, error) {
+	query := `
+		WITH latest_raid AS (
+			SELECT r.raid_id
+			FROM reserves r
+			JOIN characters c ON r.character_id = c.id
+			JOIN raids rd ON r.raid_id = rd.id
+			WHERE c.name = $1
+			ORDER BY rd.raid_date DESC
+			LIMIT 1
+		)
+		SELECT i.name
+		FROM reserves res
+		JOIN latest_raid lr ON res.raid_id = lr.raid_id
+		JOIN characters c ON res.character_id = c.id
+		JOIN items i ON res.item_id = i.id
+		WHERE c.name = $1`
+
+	rows, err := r.Db.QueryContext(ctx, query, charName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	return items, nil
 }

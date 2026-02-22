@@ -17,10 +17,11 @@ type Item struct {
 
 // RaidResult represents the combined data from CSV and Turtlogs
 type RaidResult struct {
-	RaidID   string
-	RaidDate time.Time
-	Reserves []ReserveEntry
-	Drops    []LootDrop
+	RaidID    int
+	RaidDate  time.Time
+	Attendees []Player
+	Reserves  []ReserveEntry
+	Drops     []LootDrop
 }
 
 type ReserveEntry struct {

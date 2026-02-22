@@ -5,17 +5,19 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/zepheo/guild_manager/internal/domain"
 )
 
 type TurtlogsClient struct {
-	BaseURL    string
-	HTTPClient *http.Client
-	reID       *regexp.Regexp
-	reTiny     *regexp.Regexp
-	reFull     *regexp.Regexp
+	BaseURL       string
+	HTTPClient    *http.Client
+	reID          *regexp.Regexp
+	reTiny        *regexp.Regexp
+	reFull        *regexp.Regexp
+	reUnknownName *regexp.Regexp
 }
 
 func NewTurtlogsClient(baseURL string) *TurtlogsClient {
@@ -25,9 +27,10 @@ func NewTurtlogsClient(baseURL string) *TurtlogsClient {
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		reID:   regexp.MustCompile(`^[0-9]{5}$`),
-		reTiny: regexp.MustCompile(fmt.Sprintf(`^%s/tiny_url/([0-9]+)$`, escapedBase)),
-		reFull: regexp.MustCompile(fmt.Sprintf(`^%s/viewer/([0-9]+)/base.?$`, escapedBase)),
+		reID:          regexp.MustCompile(`^[0-9]{5}$`),
+		reTiny:        regexp.MustCompile(fmt.Sprintf(`^%s/tiny_url/([0-9]+)$`, escapedBase)),
+		reFull:        regexp.MustCompile(fmt.Sprintf(`^%s/viewer/([0-9]+)/base.?$`, escapedBase)),
+		reUnknownName: regexp.MustCompile("Unknown-[0-9]+"),
 	}
 }
 
@@ -80,9 +83,23 @@ func (c *TurtlogsClient) GetRaidData(log string) (*RaidData, error) {
 	}, nil
 }
 
+type MillisecondTime struct {
+	time.Time
+}
+
+func (m *MillisecondTime) UnmarshalJSON(b []byte) error {
+	ms, err := strconv.ParseInt(string(b), 10, 64)
+	if err != nil {
+		return err
+	}
+
+	m.Time = time.Unix(0, ms*int64(time.Millisecond))
+	return nil
+}
+
 type RaidMetaData struct {
-	RaidID   int       `json:"instance_meta_id"`
-	RaidDate time.Time `json:"start_ts"`
+	RaidID   int             `json:"instance_meta_id"`
+	RaidDate MillisecondTime `json:"start_ts"` // Use the custom type here
 }
 
 func (c *TurtlogsClient) GetRaidMetaData(log string) (*RaidMetaData, error) {
@@ -131,7 +148,7 @@ func (c *TurtlogsClient) GetRaidPlayers(log string) (map[int]domain.Player, erro
 	players := map[int]domain.Player{}
 
 	for _, p := range participants {
-		if p.HeroClassID < 12 {
+		if p.HeroClassID < 12 && !c.reUnknownName.MatchString(p.Name) {
 			players[p.CharacterID] = domain.Player{
 				ID:            p.CharacterID,
 				CharacterName: p.Name,

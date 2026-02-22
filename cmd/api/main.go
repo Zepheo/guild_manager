@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"context"
@@ -33,7 +33,12 @@ func main() {
 
 	repo := &postgres.PostgresRaidRepo{Db: db}
 	parser := csv.NewParser()
-	client := &turtlogs.TurtlogsClient{BaseURL: "https://turtlogs.com"}
+
+	baseUrl := os.Getenv("LOGS_URL")
+	if baseUrl == "" {
+		log.Fatalf("LOGS_URL environment variable is required")
+	}
+	client := turtlogs.NewTurtlogsClient(baseUrl)
 
 	raidService := service.NewRaidService(repo, parser, client)
 

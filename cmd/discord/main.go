@@ -1,4 +1,4 @@
-package discord
+package main
 
 import (
 	"log"
@@ -19,6 +19,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Bot failed to connect to DB: %v", err)
 	}
+
+	if err := postgres.RunMigrations(db); err != nil {
+		log.Fatal("Migration failed:", err)
+	}
+
 	repo := &postgres.PostgresRaidRepo{Db: db}
 
 	// 2. Initialize Bot
@@ -36,7 +41,7 @@ func main() {
 	client := turtlogs.NewTurtlogsClient(baseUrl)
 
 	service := service.NewRaidService(repo, parser, client)
-	b, err := discordBot.NewBot(token, service)
+	b, err := discordBot.NewBot(token, service, repo)
 	if err != nil {
 		log.Fatalf("Failed to initialize bot: %v", err)
 	}
@@ -45,6 +50,11 @@ func main() {
 	b.RegisterHandlers()
 	if err := b.Session.Open(); err != nil {
 		log.Fatalf("Error opening Discord session: %v", err)
+	}
+
+	_, err = b.RegisterCommands()
+	if err != nil {
+		log.Fatalf("Error registering commands: %v", err)
 	}
 	defer b.Session.Close()
 

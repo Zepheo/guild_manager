@@ -28,17 +28,6 @@ func (m *MockRaidRepo) GetPlayerBonus(ctx context.Context, charName string) (int
 	return m.Bonuses[charName], nil
 }
 
-func (m *MockRaidRepo) ProcessRaidUpdate(ctx context.Context, charName string, newBonus int, reason string) error {
-	m.Bonuses[charName] = newBonus
-	return nil
-}
-
-// Satisfying the rest of the interface defined in repository.go
-func (m *MockRaidRepo) UpdatePlayerBonus(ctx context.Context, charName string, newBonus int, reason string) error {
-	m.Bonuses[charName] = newBonus
-	return nil
-}
-
 func (m *MockRaidRepo) RecordRaid(ctx context.Context, raid *domain.RaidResult) error {
 	m.RaidHistory = append(m.RaidHistory, raid)
 	return nil

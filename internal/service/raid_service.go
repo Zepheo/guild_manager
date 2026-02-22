@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"strings"
 
 	"github.com/zepheo/guild_manager/internal/domain"
 	"github.com/zepheo/guild_manager/internal/ingestor/csv"
@@ -18,7 +16,6 @@ type RaidService struct {
 	logClient *turtlogs.TurtlogsClient
 }
 
-// NewRaidService is the constructor (Dependency Injection)
 func NewRaidService(r storage.RaidRepository, p *csv.Parser, c *turtlogs.TurtlogsClient) *RaidService {
 	return &RaidService{
 		repo:      r,
@@ -27,56 +24,36 @@ func NewRaidService(r storage.RaidRepository, p *csv.Parser, c *turtlogs.Turtlog
 	}
 }
 
-// ProcessRaid brings everything together
 func (s *RaidService) ProcessRaid(ctx context.Context, csvFile io.Reader, logID string) error {
-	// 1. Use the specific method we defined in the CSV package
 	reserves, err := s.csvParser.ParseRaidResCSV(csvFile)
 	if err != nil {
-		return fmt.Errorf("csv parsing failed: %w", err)
+		return err
 	}
 
-	// 2. Fetch the JSON loot from Turtlogs
 	logData, err := s.logClient.GetRaidData(logID)
 	if err != nil {
-		return fmt.Errorf("turtlogs fetch failed: %w", err)
+		return err
 	}
 
-	// 3. Process each player found in the CSV
+	result := &domain.RaidResult{
+		RaidID:   logData.Meta.RaidID,
+		RaidDate: logData.Meta.RaidDate.Time,
+	}
+
 	for _, res := range reserves {
-		// 1. Get current state (or default to 0/empty)
-		prevItem, _ := s.repo.GetLastReserve(ctx, res.PlayerName)
-		currentBonus, err := s.repo.GetPlayerBonus(ctx, res.PlayerName)
-		if err != nil {
-			// If the player doesn't exist, GetPlayerBonus returns 0, nil already.
-			// But if there's a real DB error, we should log it.
-			fmt.Printf("Warning: could not fetch bonus for %s: %v\n", res.PlayerName, err)
-		}
-
-		dropped, winner := s.analyzeLoot(res.ItemName, logData)
-
-		// 2. Apply SR+ Logic
-		newScore := domain.CalculateNewBonus(
-			currentBonus,
-			prevItem,
-			res.ItemName,
-			dropped,
-			winner == res.PlayerName,
-		)
-
-		// 3. Persist
-		reason := fmt.Sprintf("Log %s: %s (Dropped: %v, Won: %v)", logID, res.ItemName, dropped, winner == res.PlayerName)
-		s.repo.UpdatePlayerBonus(ctx, res.PlayerName, newScore, reason)
+		result.Reserves = append(result.Reserves, res)
 	}
 
-	return nil
-}
-
-func (s *RaidService) analyzeLoot(reservedItem string, logData *turtlogs.RaidData) (bool, string) {
 	for _, drop := range logData.LootDrops {
-		// We use Case Insensitive comparison for safety
-		if strings.EqualFold(strings.TrimSpace(drop.ItemName), strings.TrimSpace(reservedItem)) {
-			return true, drop.WinnerName
-		}
+		result.Drops = append(result.Drops, domain.LootDrop{
+			ItemName:   drop.ItemName,
+			WinnerName: drop.WinnerName,
+		})
 	}
-	return false, ""
+
+	for _, att := range logData.Players {
+		result.Attendees = append(result.Attendees, att)
+	}
+
+	return s.repo.RecordRaid(ctx, result)
 }

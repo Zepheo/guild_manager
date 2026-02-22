@@ -34,3 +34,15 @@ var Commands = []*discordgo.ApplicationCommand{
 		},
 	},
 }
+
+func (b *DiscordBot) RegisterCommands() ([]*discordgo.ApplicationCommand, error) {
+	registeredCommands := make([]*discordgo.ApplicationCommand, len(Commands))
+	for i, c := range Commands {
+		cmd, err := b.Session.ApplicationCommandCreate(b.Session.State.User.ID, "960543410530418708", c)
+		if err != nil {
+			return nil, err
+		}
+		registeredCommands[i] = cmd
+	}
+	return registeredCommands, nil
+}

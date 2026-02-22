@@ -8,6 +8,17 @@ services:
       POSTGRES_DB: ${DB_NAME:-guild_manager}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-admin} -d ${DB_NAME:-guild_manager}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   api:
     platform: linux/amd64
@@ -16,23 +27,27 @@ services:
       dockerfile: deployments/Dockerfile.api
     container_name: guild_manager_api
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
       DB_URL: postgres://${DB_USER:-admin}:${DB_PASSWORD:-supersecret}@db:5432/${DB_NAME:-guild_manager}?sslmode=disable
+      LOGS_URL: ${LOGS_URL}
 
   discord:
     platform: linux/amd64
     build:
       context: ..
       dockerfile: deployments/Dockerfile.discord
-    container_name: guild_manager_bot
+    container_name: guild_manager_discord
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DB_URL: postgres://${DB_USER:-admin}:${DB_PASSWORD:-supersecret}@db:5432/${DB_NAME:-guild_manager}?sslmode=disable
       DISCORD_TOKEN: ${DISCORD_TOKEN}
+      LOGS_URL: ${LOGS_URL}
 
 volumes:
   postgres_data:
