@@ -32,7 +32,7 @@ func Connect(connStr string) (*sql.DB, error) {
 	return db, nil
 }
 
-func (r *PostgresRaidRepo) GetLastReserve(ctx context.Context, charName string) (string, error) {
+func (r *PostgresRaidRepo) GetLastReserve(ctx context.Context, charName string, raid domain.Raid) (string, error) {
 	query := `
 		SELECT i.name
 		FROM reserves r
@@ -40,21 +40,19 @@ func (r *PostgresRaidRepo) GetLastReserve(ctx context.Context, charName string) 
 		JOIN items i ON r.item_id = i.id
 		JOIN raids rd ON r.raid_id = rd.id
 		WHERE c.name = $1
+		AND rd.raid = $2
 		ORDER BY rd.raid_date DESC
 		LIMIT 1`
 
 	var itemName string
-	err := r.Db.QueryRowContext(ctx, query, charName).Scan(&itemName)
+	err := r.Db.QueryRowContext(ctx, query, charName, raid.String()).Scan(&itemName)
 	if err == sql.ErrNoRows {
 		return "", nil // New player, no previous reserve
 	}
 	return itemName, err
 }
 
-func (r *PostgresRaidRepo) GetBulkPlayerBonuses(ctx context.Context, charNames []string) (map[string]map[string]int, error) {
-	// This query calculates the bonus for every player/item combo in history
-	// It uses a window function to identify the most recent "reset" event (win or not reserved)
-	// and sums the +20s that happened after that reset.
+func (r *PostgresRaidRepo) GetBulkPlayerBonuses(ctx context.Context, charNames []string, raid domain.Raid) (map[string]map[string]int, error) {
 	query := `
 	WITH RELEVANT_HISTORY AS (
 		SELECT
@@ -67,6 +65,7 @@ func (r *PostgresRaidRepo) GetBulkPlayerBonuses(ctx context.Context, charNames [
 		FROM raids rd
 		CROSS JOIN (SELECT id, name FROM characters WHERE name = ANY($1)) c
 		CROSS JOIN (SELECT id, name FROM items) i
+		WHERE rd.raid = $2
 	),
 	STREAKS AS (
 		SELECT
@@ -88,7 +87,7 @@ func (r *PostgresRaidRepo) GetBulkPlayerBonuses(ctx context.Context, charNames [
 	GROUP BY char_name, item_name
 	HAVING SUM(20) > 0;`
 
-	rows, err := r.Db.QueryContext(ctx, query, pq.Array(charNames))
+	rows, err := r.Db.QueryContext(ctx, query, pq.Array(charNames), raid.String())
 	if err != nil {
 		return nil, err
 	}
@@ -109,15 +108,15 @@ func (r *PostgresRaidRepo) GetBulkPlayerBonuses(ctx context.Context, charNames [
 	return results, nil
 }
 
-func (r *PostgresRaidRepo) GetPlayerBonuses(ctx context.Context, charName string) (map[string]int, error) {
-	currentReserves, err := r.getCurrentReserves(ctx, charName)
+func (r *PostgresRaidRepo) GetPlayerBonuses(ctx context.Context, charName string, raid domain.Raid) (map[string]int, error) {
+	currentReserves, err := r.getCurrentReserves(ctx, charName, raid)
 	if err != nil {
 		return nil, err
 	}
 
 	bonuses := make(map[string]int)
 	for _, itemName := range currentReserves {
-		itemBonus, err := r.calculateBonusForItem(ctx, charName, itemName)
+		itemBonus, err := r.calculateBonusForItem(ctx, charName, itemName, raid)
 		if err != nil {
 			fmt.Printf("error calculating bonus: %v\n", err)
 			bonuses[itemName] = 0
@@ -137,8 +136,8 @@ func (r *PostgresRaidRepo) RecordRaid(ctx context.Context, raid *domain.RaidResu
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(ctx,
-		"INSERT INTO raids (id, raid_date) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
-		raid.RaidID, raid.RaidDate)
+		"INSERT INTO raids (id, raid_date, raid) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+		raid.RaidID, raid.RaidDate, raid.Raid.String())
 	if err != nil {
 		return err
 	}
@@ -200,7 +199,7 @@ func (r *PostgresRaidRepo) RecordRaid(ctx context.Context, raid *domain.RaidResu
 	return tx.Commit()
 }
 
-func (r *PostgresRaidRepo) calculateBonusForItem(ctx context.Context, charName, itemName string) (int, error) {
+func (r *PostgresRaidRepo) calculateBonusForItem(ctx context.Context, charName string, itemName string, raid domain.Raid) (int, error) {
 	query := `
 		SELECT
 			rd.id,
@@ -213,9 +212,10 @@ func (r *PostgresRaidRepo) calculateBonusForItem(ctx context.Context, charName, 
 		FROM raids rd
 		CROSS JOIN characters c
 		WHERE c.name = $1
+		AND rd.raid = $3
 		ORDER BY rd.raid_date ASC`
 
-	rows, err := r.Db.QueryContext(ctx, query, charName, itemName)
+	rows, err := r.Db.QueryContext(ctx, query, charName, itemName, raid.String())
 	if err != nil {
 		return 0, err
 	}
@@ -239,7 +239,7 @@ func (r *PostgresRaidRepo) calculateBonusForItem(ctx context.Context, charName, 
 	return bonus, nil
 }
 
-func (r *PostgresRaidRepo) getCurrentReserves(ctx context.Context, charName string) ([]string, error) {
+func (r *PostgresRaidRepo) getCurrentReserves(ctx context.Context, charName string, raid domain.Raid) ([]string, error) {
 	query := `
 		WITH latest_raid AS (
 			SELECT r.raid_id
@@ -247,6 +247,7 @@ func (r *PostgresRaidRepo) getCurrentReserves(ctx context.Context, charName stri
 			JOIN characters c ON r.character_id = c.id
 			JOIN raids rd ON r.raid_id = rd.id
 			WHERE c.name = $1
+			AND rd.raid = $2
 			ORDER BY rd.raid_date DESC
 			LIMIT 1
 		)
@@ -257,7 +258,7 @@ func (r *PostgresRaidRepo) getCurrentReserves(ctx context.Context, charName stri
 		JOIN items i ON res.item_id = i.id
 		WHERE c.name = $1`
 
-	rows, err := r.Db.QueryContext(ctx, query, charName)
+	rows, err := r.Db.QueryContext(ctx, query, charName, raid.String())
 	if err != nil {
 		return nil, err
 	}

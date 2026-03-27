@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/zepheo/guild_manager/internal/domain"
 )
 
 func (b *DiscordBot) RegisterHandlers() {
@@ -67,6 +68,7 @@ func (b *DiscordBot) handleScore(s *discordgo.Session, i *discordgo.InteractionC
 
 	attachementID := options[0].Value.(string)
 	attachement := i.ApplicationCommandData().Resolved.Attachments[attachementID]
+	raid := options[1].Value.(domain.Raid)
 
 	resp, err := http.Get(attachement.URL)
 	if err != nil {
@@ -76,7 +78,7 @@ func (b *DiscordBot) handleScore(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	defer resp.Body.Close()
 
-	results, err := b.RaidService.CalculateSRPlus(context.Background(), resp.Body)
+	results, err := b.RaidService.CalculateSRPlus(context.Background(), resp.Body, raid)
 	if err != nil {
 		b.respondError(s, i, fmt.Sprintf("Calculation failed: %v", err))
 		return

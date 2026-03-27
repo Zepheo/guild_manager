@@ -29,7 +29,7 @@ type SRPlus struct {
 	SR       int
 }
 
-func (s *RaidService) CalculateSRPlus(ctx context.Context, csvFile io.Reader) (map[string][]SRPlus, error) {
+func (s *RaidService) CalculateSRPlus(ctx context.Context, csvFile io.Reader, raid domain.Raid) (map[string][]SRPlus, error) {
 	// 1. Parse the incoming CSV
 	reserves, err := s.csvParser.ParseRaidResCSV(csvFile)
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *RaidService) CalculateSRPlus(ctx context.Context, csvFile io.Reader) (m
 	}
 
 	// Bulk fetch bonuses
-	bulkData, err := s.repo.GetBulkPlayerBonuses(ctx, names)
+	bulkData, err := s.repo.GetBulkPlayerBonuses(ctx, names, raid)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +81,7 @@ func (s *RaidService) ProcessRaid(ctx context.Context, csvFile io.Reader, logID 
 	result := &domain.RaidResult{
 		RaidID:   logData.Meta.RaidID,
 		RaidDate: logData.Meta.RaidDate.Time,
+		Raid:     logData.Meta.Raid,
 	}
 
 	for _, res := range reserves {

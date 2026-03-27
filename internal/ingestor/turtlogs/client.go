@@ -100,6 +100,7 @@ func (m *MillisecondTime) UnmarshalJSON(b []byte) error {
 type RaidMetaData struct {
 	RaidID   int             `json:"instance_meta_id"`
 	RaidDate MillisecondTime `json:"start_ts"` // Use the custom type here
+	Raid     domain.Raid     `json:"map_id"`
 }
 
 func (c *TurtlogsClient) GetRaidMetaData(log string) (*RaidMetaData, error) {

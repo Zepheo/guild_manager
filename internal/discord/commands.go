@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/zepheo/guild_manager/internal/domain"
 )
 
 var Commands = []*discordgo.ApplicationCommand{
@@ -17,6 +18,26 @@ var Commands = []*discordgo.ApplicationCommand{
 				Name:        "file",
 				Description: "Reserve list to update SR for",
 				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:        "raid",
+				Description: "Raid to update SR for",
+				Required:    true,
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{
+						Name:  "MC",
+						Value: domain.MC,
+					},
+					{
+						Name:  "ES",
+						Value: domain.ES,
+					},
+					{
+						Name:  "BWL",
+						Value: domain.BWL,
+					},
+				},
 			},
 		},
 	},
