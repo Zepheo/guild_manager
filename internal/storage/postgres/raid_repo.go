@@ -180,6 +180,10 @@ func (r *PostgresRaidRepo) RecordRaid(ctx context.Context, raid *domain.RaidResu
 	}
 
 	for _, drop := range raid.Drops {
+		_, err := tx.ExecContext(ctx, `INSERT INTO items (name) VALUES ($1) OFF CONFLICT (name) DO NOTHING`, drop.ItemName)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO loot_history (raid_id, item_id, winner_id, is_reserve_win)
 			SELECT $1, i.id, c.id, EXISTS (

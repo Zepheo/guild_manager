@@ -68,7 +68,7 @@ func (b *DiscordBot) handleScore(s *discordgo.Session, i *discordgo.InteractionC
 
 	attachementID := options[0].Value.(string)
 	attachement := i.ApplicationCommandData().Resolved.Attachments[attachementID]
-	raid := options[1].Value.(domain.Raid)
+	raid := domain.Raid(options[1].Value.(float64))
 
 	resp, err := http.Get(attachement.URL)
 	if err != nil {
