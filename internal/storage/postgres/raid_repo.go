@@ -180,7 +180,7 @@ func (r *PostgresRaidRepo) RecordRaid(ctx context.Context, raid *domain.RaidResu
 	}
 
 	for _, drop := range raid.Drops {
-		_, err := tx.ExecContext(ctx, `INSERT INTO items (name) VALUES ($1) OFF CONFLICT (name) DO NOTHING`, drop.ItemName)
+		_, err := tx.ExecContext(ctx, `INSERT INTO items (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, drop.ItemName)
 		if err != nil {
 			return err
 		}
